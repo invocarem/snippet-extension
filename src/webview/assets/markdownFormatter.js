@@ -79,6 +79,77 @@ function parseHarmonyMessage(input) {
 }
 
 /**
+ * Preprocess markdown text to fix common LLM formatting issues
+ */
+function preprocessMarkdown(text) {
+  let processed = text;
+
+  // Fix cases where language is on its own line followed by code
+  const lines = processed.split("\n");
+  let result = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i].trim();
+    const nextLine = lines[i + 1] || "";
+
+    // Check if this line is just a language name and next line starts with code
+    if (
+      line &&
+      !line.includes(" ") &&
+      !line.startsWith("#") &&
+      !line.startsWith("-") &&
+      !line.startsWith("*") &&
+      nextLine &&
+      (nextLine.includes("def ") ||
+        nextLine.includes("class ") ||
+        nextLine.includes("import ") ||
+        nextLine.includes("from ") ||
+        nextLine.includes("function ") ||
+        nextLine.match(/^\w+\s*=/) ||
+        nextLine.match(/^\w+\s*\(/))
+    ) {
+      // Found a language line followed by code, wrap it
+      let codeLines = [];
+      let j = i + 1;
+
+      // Collect code lines until we hit a clear non-code indicator
+      while (j < lines.length) {
+        const codeLine = lines[j];
+        if (
+          (codeLine.startsWith("# ") &&
+            codeLine.length > 2 &&
+            !codeLine.startsWith("# ")) ||
+          codeLine.match(/^[A-Z][^:]*:/) ||
+          codeLine.startsWith("- ") ||
+          codeLine.match(/^\d+\. /)
+        ) {
+          break;
+        }
+        codeLines.push(codeLine);
+        j++;
+      }
+
+      if (codeLines.length > 0) {
+        result.push("```" + line);
+        result.push(...codeLines);
+        result.push("```");
+        i = j - 1; // Skip the code lines we just processed
+      } else {
+        result.push(lines[i]);
+      }
+    } else {
+      result.push(lines[i]);
+    }
+    i++;
+  }
+
+  processed = result.join("\n");
+
+  return processed;
+}
+
+/**
  * Format markdown text to HTML
  */
 function formatMarkdown(text) {
@@ -87,6 +158,9 @@ function formatMarkdown(text) {
   // First, parse Harmony protocol if present
   const parsed = parseHarmonyMessage(text);
   let html = parsed.finalMessage;
+
+  // Preprocess to fix common formatting issues
+  html = preprocessMarkdown(html);
 
   // Extract thinking blocks BEFORE escaping HTML (use placeholders)
   const thinkingBlocks = [];
@@ -108,6 +182,14 @@ function formatMarkdown(text) {
     codeBlocks.push({ language: language.trim(), code: code.trim() });
     return placeholder;
   });
+
+  // Log extracted code blocks for debugging
+  if (codeBlocks.length > 0) {
+    console.log("Found", codeBlocks.length, "code block(s):");
+    codeBlocks.forEach((block, i) => {
+      console.log(`Code block ${i + 1} (${block.language}):`, block.code);
+    });
+  }
 
   // Escape HTML
   html = escapeHtml(html);
@@ -237,7 +319,21 @@ function formatMarkdown(text) {
     html = html.replace(placeholder, thinkingHtml);
   }
 
-  console.log("Processed output:", html.substring(0, 100) + "...");
+  // Convert HTML to readable text for logging
+  const readableOutput = html
+    .replace(/<p>/g, "")
+    .replace(/<\/p>/g, "\n\n")
+    .replace(/<br\s*\/?>/g, "\n")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+
+  console.log(
+    "Processed output (readable):",
+    readableOutput.substring(0, 200) + "..."
+  );
   return html;
 }
 

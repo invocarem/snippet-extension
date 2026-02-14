@@ -73,5 +73,21 @@ describe("Client-side Markdown Formatting", () => {
       expect(output).toContain("thinking-block-container");
       expect(output).toContain("This is my reasoning");
     });
-  });
-});
+
+    it("should fix malformed code blocks with language on separate line", () => {
+      const input = `# 📁 hello.py
+python
+def greet(name="Maria"): 
+    """Greet someone by name."""
+    return f"Hello, {name}!"
+
+Example usage
+if __name__ == "__main": 
+    print(greet())`;
+      const output = formatMarkdown(input);
+
+      expect(output).toContain('<div class="code-block-container">');
+      expect(output).toContain('data-language="python"');
+      expect(output).toContain("def greet(name=");
+      expect(output).toContain("if __name__ == ");
+    });

@@ -15,6 +15,65 @@ export class LLMResponseProcessor {
   private static preprocessLLMOutput(text: string): string {
     let processed = text;
 
+    // Fix malformed code blocks with language on separate line
+    const inputLines = processed.split("\n");
+    let outputLines: string[] = [];
+    let lineIndex = 0;
+
+    while (lineIndex < inputLines.length) {
+      const currentLine = inputLines[lineIndex].trim();
+      const nextLine = inputLines[lineIndex + 1] || "";
+
+      // Check if this line is just a language name and next line starts with code
+      if (
+        currentLine &&
+        !currentLine.includes(" ") &&
+        !currentLine.startsWith("#") &&
+        !currentLine.startsWith("-") &&
+        !currentLine.startsWith("*") &&
+        nextLine &&
+        (nextLine.includes("def ") ||
+          nextLine.includes("class ") ||
+          nextLine.includes("import ") ||
+          nextLine.includes("from ") ||
+          nextLine.includes("function ") ||
+          nextLine.match(/^\w+\s*=/) ||
+          nextLine.match(/^\w+\s*\(/))
+      ) {
+        // Found a language line followed by code, wrap it
+        let codeLines: string[] = [];
+        let codeIndex = lineIndex + 1;
+
+        // Collect code lines until we hit a clear non-code indicator
+        while (codeIndex < inputLines.length) {
+          const codeLine = inputLines[codeIndex];
+          if (
+            codeLine.match(/^[A-Z][^:]*:/) ||
+            codeLine.startsWith("- ") ||
+            codeLine.match(/^\d+\. /)
+          ) {
+            break;
+          }
+          codeLines.push(codeLine);
+          codeIndex++;
+        }
+
+        if (codeLines.length > 0) {
+          outputLines.push("```" + currentLine);
+          outputLines.push(...codeLines);
+          outputLines.push("```");
+          lineIndex = codeIndex - 1; // Skip the code lines we just processed
+        } else {
+          outputLines.push(inputLines[lineIndex]);
+        }
+      } else {
+        outputLines.push(inputLines[lineIndex]);
+      }
+      lineIndex++;
+    }
+
+    processed = outputLines.join("\n");
+
     // Fix malformed code block starts like "python# hello.py" -> "```python\n# hello.py"
     // Handle concatenated code by finding the end patterns first
     processed = processed.replace(
@@ -131,7 +190,7 @@ export class LLMResponseProcessor {
   format(text: string): string {
     console.log("LLM Response Processor - Raw input:", text);
 
-    // Parse Harmony protocol if present
+    // Parse Harmony protocol if present (for models that use it)
     const parsed = HarmonyParser.parse(text);
     const processedText = parsed.finalMessage;
 
