@@ -1,0 +1,7 @@
+{
+  "require": ["ts-node/register"],
+  "extensions": ["ts"],
+  "spec": ["src/**/*.test.ts"],
+  "watch-files": ["src/**/*.ts"],
+  "node-option": ["loader=ts-node/esm"]
+}
