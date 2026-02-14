@@ -1,4 +1,10 @@
-import { expect } from "chai";
+// Converted from Chai to Jest
+jest.mock('axios', () => ({
+  create: () => ({
+    post: jest.fn(),
+    get: jest.fn(),
+  }),
+}));
 import * as sinon from "sinon";
 import { LlamaClient } from "../src/api/llamaClient";
 import { LLMResponseProcessor } from "../src/utils/llmResponseProcessor";
@@ -15,7 +21,7 @@ describe("SnippetViewProvider Integration", () => {
 
   describe("LlamaClient Integration", () => {
     it("should be able to create a mock LlamaClient", () => {
-      expect(mockLlamaClient).to.be.instanceOf(LlamaClient);
+      expect(mockLlamaClient).toBeInstanceOf(LlamaClient);
     });
 
     it("should handle complete calls", async () => {
@@ -23,14 +29,9 @@ describe("SnippetViewProvider Integration", () => {
 
       const result = await mockLlamaClient.complete({ prompt: "test message" });
 
-      expect(result).to.equal("Mock response");
-      expect((mockLlamaClient.complete as sinon.SinonStub).calledOnce).to.be
-        .true;
-      expect(
-        (mockLlamaClient.complete as sinon.SinonStub).calledWith({
-          prompt: "test message",
-        })
-      ).to.be.true;
+      expect(result).toBe("Mock response");
+      expect((mockLlamaClient.complete as sinon.SinonStub).calledOnce).toBe(true);
+      expect((mockLlamaClient.complete as sinon.SinonStub).calledWith({ prompt: "test message" })).toBe(true);
     });
 
     it("should handle healthCheck calls", async () => {
@@ -38,9 +39,8 @@ describe("SnippetViewProvider Integration", () => {
 
       const result = await mockLlamaClient.healthCheck();
 
-      expect(result).to.be.true;
-      expect((mockLlamaClient.healthCheck as sinon.SinonStub).calledOnce).to.be
-        .true;
+      expect(result).toBe(true);
+      expect((mockLlamaClient.healthCheck as sinon.SinonStub).calledOnce).toBe(true);
     });
 
     it("should handle health check failures", async () => {
@@ -48,24 +48,16 @@ describe("SnippetViewProvider Integration", () => {
 
       const result = await mockLlamaClient.healthCheck();
 
-      expect(result).to.be.false;
-      expect((mockLlamaClient.healthCheck as sinon.SinonStub).calledOnce).to.be
-        .true;
+      expect(result).toBe(false);
+      expect((mockLlamaClient.healthCheck as sinon.SinonStub).calledOnce).toBe(true);
     });
 
     it("should handle complete errors", async () => {
       const error = new Error("Connection failed");
       (mockLlamaClient.complete as sinon.SinonStub).rejects(error);
 
-      try {
-        await mockLlamaClient.complete({ prompt: "test message" });
-        expect.fail("Should have thrown an error");
-      } catch (err) {
-        expect(err).to.equal(error);
-      }
-
-      expect((mockLlamaClient.complete as sinon.SinonStub).calledOnce).to.be
-        .true;
+      await expect(mockLlamaClient.complete({ prompt: "test message" })).rejects.toThrow(error);
+      expect((mockLlamaClient.complete as sinon.SinonStub).calledOnce).toBe(true);
     });
   });
 
@@ -75,9 +67,7 @@ describe("SnippetViewProvider Integration", () => {
       const expected =
         "```python\ndef foo():\n    return 42\n```\nUsage: Call foo()";
       const result = LLMResponseProcessor.preprocess(input);
-      expect(result.replace(/\n/g, "")).to.include(
-        expected.replace(/\n/g, "")
-      );
+      expect(result.replace(/\n/g, "")).toContain(expected.replace(/\n/g, ""));
     });
 
     it("should format JSON code blocks", () => {
@@ -86,15 +76,15 @@ describe("SnippetViewProvider Integration", () => {
       });
       const input = "```json\n{\"a\":1,\"b\":2}\n```";
       const html = processor.format(input);
-      expect(html).to.include("language-json");
-      expect(html).to.include("&quot;a&quot;");
+      expect(html).toContain("language-json");
+      expect(html).toContain("&quot;a&quot;");
     });
 
     it("should escape HTML in code blocks", () => {
       const processor = new LLMResponseProcessor();
       const input = "```html\n<div>test</div>\n```";
       const html = processor.format(input);
-      expect(html).to.include("&lt;div&gt;test&lt;/div&gt;");
+      expect(html).toContain("&lt;div&gt;test&lt;/div&gt;");
     });
   });
 });
