@@ -1,7 +1,11 @@
 import * as vscode from "vscode";
 import { LlamaClient } from "../api/llamaClient";
+import { HarmonyParser } from "../utils/HarmonyParser";
 import { getNonce } from "../utils/getNonce";
+import { LLMResponseProcessor } from "../utils/llmResponseProcessor";
 import { SnippetManager } from "../utils/snippetManager";
+import { toolExecutor } from "../toolExecutor";
+import { extractToolCall, MCPToolCall } from "../utils/toolCallExtractor";
 
 interface Message {
   role: "user" | "assistant" | "system";
@@ -144,12 +148,42 @@ export class SnippetViewProvider implements vscode.WebviewViewProvider {
         },
         (chunk: string) => {
           fullResponse += chunk;
+          const parsed = HarmonyParser.parse(fullResponse);
+          const preprocessed = LLMResponseProcessor.preprocess(
+            parsed.finalMessage
+          );
           this._sendMessageToWebview({
             type: "assistantMessageChunk",
-            chunk,
+            chunk: preprocessed,
+            isFullContent: true,
           });
         }
       );
+
+      // Tool call detection and execution (now using utility)
+      const toolCall = extractToolCall(fullResponse);
+      if (toolCall) {
+        this._sendMessageToWebview({
+          type: "assistantMessageChunk",
+          chunk: `Executing tool: ${toolCall.name}...`,
+          isFullContent: false,
+        });
+        try {
+          const toolResult = await toolExecutor(toolCall);
+          const toolText = toolResult.content?.map(c => c.text).join("\n") || JSON.stringify(toolResult);
+          this._sendMessageToWebview({
+            type: "assistantMessageChunk",
+            chunk: toolText,
+            isFullContent: true,
+          });
+        } catch (err: any) {
+          this._sendMessageToWebview({
+            type: "assistantMessageChunk",
+            chunk: `Tool execution error: ${err.message}`,
+            isFullContent: true,
+          });
+        }
+      }
 
       // Add assistant response to history
       this.conversationHistory.push({
@@ -167,6 +201,8 @@ export class SnippetViewProvider implements vscode.WebviewViewProvider {
       });
     }
   }
+
+  // Tool call extraction is now handled by extractToolCall utility.
 
   public explainCode(code: string) {
     const message = this.snippetManager.buildExplanationPrompt(code);

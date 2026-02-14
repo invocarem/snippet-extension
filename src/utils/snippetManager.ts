@@ -5,10 +5,25 @@ export interface PromptTemplate {
   separator: string;
 }
 
+import { NativeToolsManager } from "./nativeToolManager";
+
 export class SnippetManager {
+  private static buildToolDocs(): string {
+    const nativeToolManager = new NativeToolsManager();
+    const tools = nativeToolManager.getAvailableTools();
+    let doc = "You have access to the following native tools:\n";
+    for (const tool of tools) {
+      doc += `- ${tool.name}: ${tool.description} Args: ${JSON.stringify(tool.inputSchema.properties)}\n`;
+    }
+    doc += "\nTo use a tool, respond with:\n";
+    doc += 'tool_call(tool_name="<tool_name>", args={...})';
+    return doc;
+  }
+
   private static readonly DEFAULT_TEMPLATE: PromptTemplate = {
     systemMessage:
-      "## Current Stage: Snippet \n\nYou are a helpful AI assistant. You provide prototyping help to developers, assisting them in problem solving.\n\n",
+      "## Current Stage: Snippet \n\nYou are a helpful AI assistant. You provide prototyping help to developers, assisting them in problem solving.\n\n"
+      + SnippetManager.buildToolDocs() + "\n\n",
     userPrefix: "User:",
     assistantPrefix: "Assistant:",
     separator: "\n\n",

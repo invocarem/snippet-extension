@@ -84,6 +84,9 @@ function parseHarmonyMessage(input) {
 function preprocessMarkdown(text) {
   let processed = text;
 
+  // Add line breaks before common section headers to help parsing
+  processed = processed.replace(/(Features:|Usage:|Output:|Would you like)/g, "\n$1");
+
   // Fix cases where language is on its own line followed by code
   const lines = processed.split("\n");
   let result = [];
@@ -114,15 +117,16 @@ function preprocessMarkdown(text) {
       let j = i + 1;
 
       // Collect code lines until we hit a clear non-code indicator
+      // (section headers, list items - avoid breaking on Python # comments)
       while (j < lines.length) {
         const codeLine = lines[j];
         if (
-          (codeLine.startsWith("# ") &&
-            codeLine.length > 2 &&
-            !codeLine.startsWith("# ")) ||
           codeLine.match(/^[A-Z][^:]*:/) ||
           codeLine.startsWith("- ") ||
-          codeLine.match(/^\d+\. /)
+          codeLine.match(/^\d+\. /) ||
+          codeLine.startsWith("With ") ||
+          codeLine.startsWith("Would ") ||
+          codeLine.startsWith("# Output")
         ) {
           break;
         }
@@ -145,6 +149,23 @@ function preprocessMarkdown(text) {
   }
 
   processed = result.join("\n");
+
+  // Fix malformed patterns: python# hello.py -> ```python\n# hello.py
+  processed = processed.replace(
+    /(\w+)#\s*([^]*?)(This creates:|Usage:|Output:|Save this as|Would you like)/g,
+    (match, lang, code, endMarker) =>
+      "```" + lang.trim() + "\n# " + code.trim() + "\n```\n\n" + endMarker
+  );
+  processed = processed.replace(/(\w+)#(\s*)(.+)$/gm, "```$1\n# $3");
+
+  // Fix: python def greet... -> ```python\ndef greet...
+  processed = processed.replace(
+    /^(\w+)(def |class |import |from |function |\w+\s*= |\w+\s*\()/gm,
+    "```$1\n$2"
+  );
+
+  // Fix: bashpython hello.py -> ```bash\npython hello.py
+  processed = processed.replace(/^bash(\w.+)$/gm, "```bash\n$1");
 
   return processed;
 }
@@ -175,8 +196,9 @@ function formatMarkdown(text) {
   );
 
   // Extract code blocks BEFORE escaping HTML (use placeholders)
+  // Supports: ```lang\ncode```, ```lang\n\ncode```, ```\ncode```
   const codeBlocks = [];
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (match, language, code) => {
+  html = html.replace(/```(\w*)\s*\n([\s\S]*?)```/g, (match, language, code) => {
     const placeholder =
       "PLACEHOLDERCODEBLOCK" + codeBlocks.length + "PLACEHOLDER";
     codeBlocks.push({ language: language.trim(), code: code.trim() });
@@ -210,12 +232,8 @@ function formatMarkdown(text) {
   html = html.replace(/^## (.+)$/gm, "<h2>$1</h2>");
   html = html.replace(/^# (.+)$/gm, "<h1>$1</h1>");
 
-  // Process unordered lists
-  html = html.replace(/^[\*\-\+] (.+)$/gm, "<li>$1</li>");
-  html = html.replace(/(<li>.*<\/li>)/s, "<ul>$1</ul>");
-
-  // Process ordered lists
-  html = html.replace(/^\d+\. (.+)$/gm, "<li>$1</li>");
+  // Process lists (ordered and unordered) - proper handling of multiple lists
+  html = processLists(html);
 
   // Process links [text](url)
   html = html.replace(
@@ -252,8 +270,9 @@ function formatMarkdown(text) {
       }
     } else if (
       line.match(/^<h[123]>/) ||
-      line.match(/^<ul>/) ||
-      line.match(/^<\/ul>/)
+      line.match(/^<[uo]l>/) ||
+      line.match(/^<\/[uo]l>/) ||
+      line.match(/^<li\s/)
     ) {
       if (paragraph.length > 0) {
         result.push("<p>" + paragraph.join("<br>") + "</p>");
@@ -274,8 +293,19 @@ function formatMarkdown(text) {
   // Process code block placeholders
   for (let i = 0; i < codeBlocks.length; i++) {
     const placeholder = "PLACEHOLDERCODEBLOCK" + i + "PLACEHOLDER";
-    const { language, code } = codeBlocks[i];
+    let { language, code } = codeBlocks[i];
     const lang = language.toLowerCase();
+
+    // Format and detect JSON
+    if (lang === "json" || isJSON(code)) {
+      try {
+        const formatted = JSON.stringify(JSON.parse(code), null, 2);
+        code = formatted;
+      } catch (e) {
+        // Keep original if JSON parse fails
+      }
+    }
+
     const languageClass = lang ? "language-" + lang : "language-text";
     const languageLabel = lang
       ? '<div class="code-block-header"><span class="language-label">' +
@@ -287,6 +317,8 @@ function formatMarkdown(text) {
         escapeAttribute(code) +
         '">Copy</button></div>';
 
+    // Escape code content to prevent XSS (e.g. <script> in LLM output)
+    const escapedCode = escapeHtml(code);
     const codeBlockHtml =
       '<div class="code-block-container">' +
       languageLabel +
@@ -295,7 +327,7 @@ function formatMarkdown(text) {
       '"><code class="' +
       languageClass +
       '">' +
-      code +
+      escapedCode +
       "</code></pre></div>";
     html = html.replace(placeholder, codeBlockHtml);
   }
@@ -335,6 +367,59 @@ function formatMarkdown(text) {
     readableOutput.substring(0, 200) + "..."
   );
   return html;
+}
+
+/**
+ * Process markdown lists (ordered and unordered)
+ */
+function processLists(text) {
+  const lines = text.split("\n");
+  let out = "";
+  let currentListType = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const ulMatch = line.match(/^(\s*)[*\-+]\s+(.+)$/);
+    const olMatch = line.match(/^(\s*)\d+\.\s+(.+)$/);
+
+    if (ulMatch || olMatch) {
+      const isOl = !!olMatch;
+      const match = ulMatch || olMatch;
+      const indent = match[1] || "";
+      const content = match[2] || "";
+      const listTag = isOl ? "ol" : "ul";
+
+      if (currentListType !== listTag) {
+        if (currentListType) {
+          out += "</" + currentListType + ">\n";
+        }
+        out += "<" + listTag + ">\n";
+        currentListType = listTag;
+      }
+
+      const level = Math.floor(indent.length / 2);
+      out +=
+        '<li class="list-item' +
+        (isOl ? " ordered" : "") +
+        '" data-level="' +
+        level +
+        '">' +
+        content +
+        "</li>\n";
+    } else {
+      if (currentListType) {
+        out += "</" + currentListType + ">\n";
+        currentListType = null;
+      }
+      out += line + "\n";
+    }
+  }
+
+  if (currentListType) {
+    out += "</" + currentListType + ">\n";
+  }
+
+  return out.trim();
 }
 
 /**
@@ -444,6 +529,8 @@ if (typeof module !== "undefined" && module.exports) {
     formatMarkdown,
     parseHarmonyMessage,
     formatThinkingContent,
+    processLists,
+    preprocessMarkdown,
     isJSON,
     escapeHtml,
     escapeAttribute,

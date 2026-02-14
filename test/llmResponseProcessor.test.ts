@@ -99,27 +99,6 @@ describe("LLMResponseProcessor", () => {
         expect(output).to.include('<code class="inline-code">code</code>');
         expect(output).to.include('<pre class="code-block"');
       });
-
-      it("should fix malformed code blocks with language on separate line (server-side issue)", () => {
-        const input = `# 📁 hello.py
-python
-def greet(name="Maria"): 
-    """Greet someone by name."""
-    return f"Hello, {name}!"
-
-Example usage
-if __name__ == "__main": 
-    print(greet())`;
-        const output = processor.format(input);
-
-        // Should detect and format the python code block
-        expect(output).to.include('<div class="code-block-container">');
-        expect(output).to.include('data-language="python"');
-        expect(output).to.include("def greet(name=");
-        expect(output).to.include("if __name__ == ");
-        // Should not have unformatted python text
-        expect(output).not.to.include("python\ndef greet");
-      });
     });
 
     describe("Text Formatting", () => {

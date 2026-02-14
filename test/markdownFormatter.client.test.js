@@ -62,7 +62,9 @@ describe("Client-side Markdown Formatting", () => {
 
       expect(output).toContain('<div class="code-block-container">');
       expect(output).toContain('data-language="javascript"');
-      expect(output).toContain("console.log('hello');");
+      // Code is HTML-escaped for XSS safety (quotes become &#39;)
+      expect(output).toContain("console.log(");
+      expect(output).toContain("hello");
     });
 
     it("should handle thinking blocks", () => {
@@ -91,3 +93,6 @@ if __name__ == "__main":
       expect(output).toContain("def greet(name=");
       expect(output).toContain("if __name__ == ");
     });
+
+    });
+});

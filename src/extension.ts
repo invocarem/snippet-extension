@@ -1,9 +1,13 @@
 import * as vscode from "vscode";
+
 import { SnippetViewProvider } from "./webview/provider";
+import { registerNativeToolServer } from "./api/nativeToolServer";
 
 export function activate(context: vscode.ExtensionContext) {
   console.log("Snippet extension is now active");
 
+  // Register native tool server (for LLM/native tool integration)
+  registerNativeToolServer(context);
   // Register the webview provider for the sidebar
   const provider = new SnippetViewProvider(context.extensionUri);
   context.subscriptions.push(

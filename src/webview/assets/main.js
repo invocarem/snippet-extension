@@ -147,7 +147,8 @@ window.addEventListener("message", (event) => {
 
     case "assistantMessageChunk":
       if (currentAssistantMessage) {
-        currentAssistantMessage.textContent += message.chunk;
+        // Server sends preprocessed full content each time (isFullContent: true)
+        currentAssistantMessage.textContent = message.chunk;
         formatMessageContent(currentAssistantMessage);
         chatContainer.scrollTop = chatContainer.scrollHeight;
       }

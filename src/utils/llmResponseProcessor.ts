@@ -15,6 +15,9 @@ export class LLMResponseProcessor {
   private static preprocessLLMOutput(text: string): string {
     let processed = text;
 
+    // Add line breaks before common section headers to help parsing
+    processed = processed.replace(/(Features:|Usage:|Output:|Would you like)/g, "\n$1");
+
     // Fix malformed code blocks with language on separate line
     const inputLines = processed.split("\n");
     let outputLines: string[] = [];
@@ -90,22 +93,17 @@ export class LLMResponseProcessor {
 
     // Fix cases where language is directly followed by code like "python def greet..."
     processed = processed.replace(
-      /^(\w+)(def |class |import |from |function |\w+\s*=)/gm,
+      /^(\w+)(def |class |import |from |function |\w+\s*= |\w+\s*\()/gm,
       "```$1\n$2"
     );
-    // Add basic line breaks within code blocks for readability
+    // Fix common LLM typos inside code blocks (avoid adding newlines - can corrupt valid code)
     processed = processed.replace(
       /```(\w+)([\s\S]*?)```/g,
       (match, lang, code) => {
-        // Add line breaks after certain patterns in code
-        let formattedCode = code
-          .replace(/def /g, "\ndef ") // New line before function definitions
-          .replace(/if /g, "\nif ") // New line before if statements
-          .replace(/class /g, "\nclass ") // New line before class definitions
-          .replace(/import /g, "\nimport ") // New line before imports
-          .replace(/from /g, "\nfrom ") // New line before from imports
-          .replace(/# /g, "\n# "); // New line before comments
-
+        let formattedCode = code.replace(
+          /if name == "main":/g,
+          'if __name__ == "__main__":'
+        );
         return "```" + lang.trim() + "\n" + formattedCode.trim() + "\n```";
       }
     );
@@ -142,7 +140,10 @@ export class LLMResponseProcessor {
           /^#{1,6} /.test(nextLine) ||
           /^[A-Z][^:]*:/.test(nextLine) ||
           /^- /.test(nextLine) ||
-          /^\d+\. /.test(nextLine)
+          /^\d+\. /.test(nextLine) ||
+          /^With /.test(nextLine) ||
+          /^Would /.test(nextLine) ||
+          /^# Output/.test(nextLine)
         ) {
           // Close the code block
           if (!codeBuffer[codeBuffer.length - 1].trim().endsWith("```")) {
@@ -284,6 +285,14 @@ export class LLMResponseProcessor {
 
     console.log("LLM Response Processor - Processed output:", html);
     return html;
+  }
+
+  /**
+   * Preprocess LLM output to fix common markdown formatting issues.
+   * Exposed as static for server-side use before sending to webview.
+   */
+  static preprocess(text: string): string {
+    return LLMResponseProcessor.preprocessLLMOutput(text);
   }
 
   /**
