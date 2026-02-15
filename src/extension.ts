@@ -2,14 +2,33 @@ import * as vscode from "vscode";
 
 import { SnippetViewProvider } from "./webview/provider";
 import { registerNativeToolServer } from "./api/nativeToolServer";
+import { registerRuleServer } from "./api/ruleServer";
+import { MCPManager } from "./mcpManager";
+import { MCPToolServer } from "./api/mcpToolServer";
 
 export function activate(context: vscode.ExtensionContext) {
   console.log("Snippet extension is now active");
 
   // Register native tool server (for LLM/native tool integration)
   registerNativeToolServer(context);
-  // Register the webview provider for the sidebar
-  const provider = new SnippetViewProvider(context.extensionUri);
+  // Register rule server (for rule management) and get RulesManager for prompts
+  const ruleServer = registerRuleServer(context);
+  const rulesManager = ruleServer.getRulesManager();
+
+  // Create MCP manager and initialize servers (may connect to 0 or more MCP servers)
+  const mcpManager = new MCPManager();
+  const mcpServers = vscode.workspace.getConfiguration('snippet').get('mcpServers') as any[];
+  if (mcpServers && mcpServers.length > 0) {
+    mcpManager.initializeServers(mcpServers).then(() => {
+      console.log("MCP servers initialized from settings.");
+    });
+  } else {
+    console.log("No MCP servers configured in settings.");
+  }
+  context.subscriptions.push({ dispose: () => mcpManager.dispose() });
+
+  // Register the webview provider for the sidebar (pass mcpManager and rulesManager for prompts)
+  const provider = new SnippetViewProvider(context.extensionUri, mcpManager, rulesManager);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider("snippet.chatView", provider, {
       webviewOptions: {

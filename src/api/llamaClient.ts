@@ -97,13 +97,15 @@ export class LlamaClient {
               try {
                 const data = JSON.parse(line.slice(6));
                 if (data.content) {
+                  //console.log(`[STREAM] Received chunk: "${data.content}"`);
                   onChunk(data.content);
                 }
                 if (data.stop) {
+                  //console.log(`[STREAM] Stream completed`);
                   resolve();
                 }
               } catch (e) {
-                // Ignore parse errors
+                console.error(`[STREAM] Failed to parse streaming data:`, line, e);
               }
             }
           }

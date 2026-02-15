@@ -5,35 +5,118 @@ export interface PromptTemplate {
   separator: string;
 }
 
+
 import { NativeToolsManager } from "./nativeToolManager";
+import { MCPManager } from "../mcpManager";
+import type { Rule } from "../rulesManager";
+import type { RulesManager } from "../rulesManager";
 
 export class SnippetManager {
-  private static buildToolDocs(): string {
-    const nativeToolManager = new NativeToolsManager();
-    const tools = nativeToolManager.getAvailableTools();
-    let doc = "You have access to the following native tools:\n";
-    for (const tool of tools) {
-      doc += `- ${tool.name}: ${tool.description} Args: ${JSON.stringify(tool.inputSchema.properties)}\n`;
+    /**
+     * Returns help text for tool_call usage, including examples and available tools.
+     */
+    static toolCallHelp(nativeToolManager?: NativeToolsManager, mcpManager?: MCPManager): string {
+      return (
+        "### How to use tool_call\n" +
+        "To call a tool, use the following format:\n\n" +
+        "tool_call(name=\"TOOL_NAME\", arguments={ ... })\n\n" +
+        "Example:\n" +
+        "tool_call(name=\"read_file\", arguments={ \"file_path\": \"src/index.ts\" })\n\n" +
+        SnippetManager.buildToolDocs(nativeToolManager, mcpManager)
+      );
     }
-    doc += "\nTo use a tool, respond with:\n";
-    doc += 'tool_call(tool_name="<tool_name>", args={...})';
+
+  private static buildToolDocs(nativeToolManager?: NativeToolsManager, mcpManager?: MCPManager): string {
+    const manager = nativeToolManager || new NativeToolsManager();
+    const nativeTools = manager.getAvailableTools();
+    let doc = "**Available native tools:**\n";
+    doc += nativeTools.map(tool => `- ${tool.name}: ${tool.description}`).join("\n");
+
+    if (mcpManager) {
+      const mcpTools = mcpManager.getAllTools();
+      if (mcpTools.length > 0) {
+        doc += "\n\n**Available MCP tools:**\n";
+        doc += mcpTools.map(tool => `- ${tool.name}: ${tool.description || ''}`).join("\n");
+      }
+    }
     return doc;
   }
 
-  private static readonly DEFAULT_TEMPLATE: PromptTemplate = {
-    systemMessage:
-      "## Current Stage: Snippet \n\nYou are a helpful AI assistant. You provide prototyping help to developers, assisting them in problem solving.\n\n"
-      + SnippetManager.buildToolDocs() + "\n\n",
-    userPrefix: "User:",
-    assistantPrefix: "Assistant:",
-    separator: "\n\n",
-  };
+
+
+  private static buildDefaultTemplate(
+    rulesText: string,
+    nativeToolManager?: NativeToolsManager,
+    mcpManager?: MCPManager
+  ): PromptTemplate {
+    return {
+      systemMessage:
+        "## Current Stage: Snippet \n\nYou are a helpful AI assistant. You provide prototyping help to developers, assisting them in problem solving.\n\n"
+        + SnippetManager.toolCallHelp(nativeToolManager, mcpManager) + "\n\n"
+        + rulesText + "\n\n",
+      userPrefix: "User:",
+      assistantPrefix: "Assistant:",
+      separator: "\n\n",
+    };
+  }
+
+  private _buildSystemMessage(): string {
+    const rulesText = this.rulesManager
+      ? this.rulesManager.formatRulesForPrompt(this.rulesManager.getAllRules())
+      : "";
+    const base = SnippetManager.buildDefaultTemplate(
+      rulesText,
+      this.nativeToolManager,
+      this.mcpManager
+    );
+    return base.systemMessage;
+  }
 
   private currentTemplate: PromptTemplate;
+  private rules: Rule[] = [];
+  private rulesManager?: RulesManager;
+  private nativeToolManager?: NativeToolsManager;
+  private mcpManager?: MCPManager;
 
-  constructor(template?: Partial<PromptTemplate>) {
-    this.currentTemplate = { ...SnippetManager.DEFAULT_TEMPLATE, ...template };
+  constructor(options?: {
+    template?: Partial<PromptTemplate>;
+    rules?: Rule[];
+    rulesManager?: RulesManager;
+    nativeToolManager?: NativeToolsManager;
+    mcpManager?: MCPManager;
+  }) {
+    this.rules = options?.rules || [];
+    this.rulesManager = options?.rulesManager;
+    this.nativeToolManager = options?.nativeToolManager;
+    this.mcpManager = options?.mcpManager;
+    const rulesText = this.rulesManager
+      ? this.rulesManager.formatRulesForPrompt(this.rulesManager.getAllRules())
+      : (this.rules.length > 0 ? this.rules.map(r => `## Rule: ${r.id}\n${r.content}`).join("\n\n") : "");
+    this.currentTemplate = {
+      ...SnippetManager.buildDefaultTemplate(
+        rulesText,
+        this.nativeToolManager,
+        this.mcpManager
+      ),
+      ...options?.template,
+    };
   }
+
+  /**
+   * Set rules and update the template system message
+   */
+  setRules(rules: Rule[]): void {
+    this.rules = rules;
+    const rulesText = this.rulesManager
+      ? this.rulesManager.formatRulesForPrompt(this.rulesManager.getAllRules())
+      : (this.rules.length > 0 ? this.rules.map(r => `## Rule: ${r.id}\n${r.content}`).join("\n\n") : "");
+    this.currentTemplate.systemMessage = SnippetManager.buildDefaultTemplate(
+      rulesText,
+      this.nativeToolManager,
+      this.mcpManager
+    ).systemMessage;
+  }
+
 
   /**
    * Build a conversation prompt from message history
@@ -44,7 +127,8 @@ export class SnippetManager {
       content: string;
     }>
   ): string {
-    let prompt = this.currentTemplate.systemMessage;
+    // Build system message with current tool docs (incl. MCP tools that may have connected after init)
+    let prompt = this._buildSystemMessage();
 
     for (const msg of conversationHistory) {
       if (msg.role === "user") {
@@ -85,6 +169,15 @@ export class SnippetManager {
    * Reset to default template
    */
   resetToDefault(): void {
-    this.currentTemplate = { ...SnippetManager.DEFAULT_TEMPLATE };
+    const rulesText = this.rulesManager
+      ? this.rulesManager.formatRulesForPrompt(this.rulesManager.getAllRules())
+      : (this.rules.length > 0 ? this.rules.map(r => `## Rule: ${r.id}\n${r.content}`).join("\n\n") : "");
+    this.currentTemplate = {
+      ...SnippetManager.buildDefaultTemplate(
+        rulesText,
+        this.nativeToolManager,
+        this.mcpManager
+      ),
+    };
   }
 }

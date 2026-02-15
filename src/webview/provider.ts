@@ -6,6 +6,8 @@ import { LLMResponseProcessor } from "../utils/llmResponseProcessor";
 import { SnippetManager } from "../utils/snippetManager";
 import { toolExecutor } from "../toolExecutor";
 import { extractToolCall, MCPToolCall } from "../utils/toolCallExtractor";
+import type { MCPManager } from "../mcpManager";
+import type { RulesManager } from "../rulesManager";
 
 interface Message {
   role: "user" | "assistant" | "system";
@@ -18,9 +20,18 @@ export class SnippetViewProvider implements vscode.WebviewViewProvider {
   private llamaClient?: LlamaClient;
   private conversationHistory: Message[] = [];
   private snippetManager: SnippetManager;
+  private mcpManager?: MCPManager;
 
-  constructor(private readonly _extensionUri: vscode.Uri) {
-    this.snippetManager = new SnippetManager();
+  constructor(
+    private readonly _extensionUri: vscode.Uri,
+    mcpManager?: MCPManager,
+    rulesManager?: RulesManager
+  ) {
+    this.mcpManager = mcpManager;
+    this.snippetManager = new SnippetManager({
+      mcpManager,
+      rulesManager,
+    });
   }
 
   public resolveWebviewView(
@@ -132,64 +143,92 @@ export class SnippetViewProvider implements vscode.WebviewViewProvider {
       const temperature = config.get<number>("temperature", 0.7);
       const maxTokens = config.get<number>("maxTokens", 2048);
 
-      // Build the prompt from conversation history
-      const prompt = this.snippetManager.buildConversationPrompt(
-        this.conversationHistory
-      );
+      let continueLoop = true;
+      let lastToolResult: string | undefined = undefined;
+      let isFirst = true;
 
-      let fullResponse = "";
+      while (continueLoop) {
+        // Build the prompt from conversation history
+        const prompt = this.snippetManager.buildConversationPrompt(
+          this.conversationHistory
+        );
 
-      await this.llamaClient.streamComplete(
-        {
-          prompt,
-          temperature,
-          n_predict: maxTokens,
-          stop: ["User:", "\nUser:", "Human:", "\nHuman:"],
-        },
-        (chunk: string) => {
-          fullResponse += chunk;
-          const parsed = HarmonyParser.parse(fullResponse);
-          const preprocessed = LLMResponseProcessor.preprocess(
-            parsed.finalMessage
-          );
+        let fullResponse = "";
+        //console.log(`[PROVIDER] Starting streaming completion for prompt length: ${prompt.length}`);
+
+        await this.llamaClient.streamComplete(
+          {
+            prompt,
+            temperature,
+            n_predict: maxTokens,
+            stop: ["User:", "\nUser:", "Human:", "\nHuman:"],
+          },
+          (chunk: string) => {
+            fullResponse += chunk;
+            const parsed = HarmonyParser.parse(fullResponse);
+            const preprocessed = LLMResponseProcessor.preprocess(
+              parsed.finalMessage
+            );
+            this._sendMessageToWebview({
+              type: "assistantMessageChunk",
+              chunk: preprocessed,
+              isFullContent: true,
+            });
+          }
+        );
+
+        console.log(`[PROVIDER] Streaming completed. Full response length: ${fullResponse.length}`);
+        console.log(`[PROVIDER] Full response:`, fullResponse);
+        const toolCall = extractToolCall(fullResponse);
+        if (toolCall) {
+          console.log(`[PROVIDER] Tool call detected:`, toolCall);
           this._sendMessageToWebview({
             type: "assistantMessageChunk",
-            chunk: preprocessed,
-            isFullContent: true,
+            chunk: `Executing tool: ${toolCall.name}...`,
+            isFullContent: false,
           });
-        }
-      );
-
-      // Tool call detection and execution (now using utility)
-      const toolCall = extractToolCall(fullResponse);
-      if (toolCall) {
-        this._sendMessageToWebview({
-          type: "assistantMessageChunk",
-          chunk: `Executing tool: ${toolCall.name}...`,
-          isFullContent: false,
-        });
-        try {
-          const toolResult = await toolExecutor(toolCall);
-          const toolText = toolResult.content?.map(c => c.text).join("\n") || JSON.stringify(toolResult);
-          this._sendMessageToWebview({
-            type: "assistantMessageChunk",
-            chunk: toolText,
-            isFullContent: true,
+          try {
+            const toolResult = await toolExecutor(toolCall, {
+              mcpManager: this.mcpManager,
+            });
+            const toolText = toolResult.content?.map(c => c.text).join("\n") || JSON.stringify(toolResult);
+            console.log(`[PROVIDER] Tool execution result:`, toolText);
+            this._sendMessageToWebview({
+              type: "assistantMessageChunk",
+              chunk: toolText,
+              isFullContent: true,
+            });
+            // Add tool result to conversation history as assistant message
+            this.conversationHistory.push({
+              role: "assistant",
+              content: fullResponse,
+            });
+            // Add tool result as user message for next round
+            this.conversationHistory.push({
+              role: "user",
+              content: toolText,
+            });
+            // Continue loop to allow next tool call
+            isFirst = false;
+            continue;
+          } catch (err: any) {
+            this._sendMessageToWebview({
+              type: "assistantMessageChunk",
+              chunk: `Tool execution error: ${err.message}`,
+              isFullContent: true,
+            });
+            continueLoop = false;
+            break;
+          }
+        } else {
+          // No more tool calls, finish
+          this.conversationHistory.push({
+            role: "assistant",
+            content: fullResponse,
           });
-        } catch (err: any) {
-          this._sendMessageToWebview({
-            type: "assistantMessageChunk",
-            chunk: `Tool execution error: ${err.message}`,
-            isFullContent: true,
-          });
+          continueLoop = false;
         }
       }
-
-      // Add assistant response to history
-      this.conversationHistory.push({
-        role: "assistant",
-        content: fullResponse,
-      });
 
       this._sendMessageToWebview({
         type: "assistantMessageEnd",

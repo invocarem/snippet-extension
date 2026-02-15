@@ -1,3 +1,16 @@
+describe("extractToolCall - MCP tool edge cases", () => {
+  it("extracts tool_call with underscores in MCP tool name", () => {
+    const response = 'tool_call(name="analyze_latin", arguments={"word": "invenietur"})';
+    const result = extractToolCall(response);
+    expect(result).toEqual({ name: "analyze_latin", arguments: { word: "invenietur" } });
+  });
+
+  it("extracts tool_call with no underscores altered", () => {
+    const response = 'tool_call(name="read_file", arguments={"file_path": "test.py"})';
+    const result = extractToolCall(response);
+    expect(result).toEqual({ name: "read_file", arguments: { file_path: "test.py" } });
+  });
+});
 import { extractToolCall, MCPToolCall } from "../src/utils/toolCallExtractor";
 
 describe("extractToolCall", () => {
@@ -42,5 +55,11 @@ describe("extractToolCall", () => {
     const response = `tool_call(name=\"bigTool\", arguments=${json})`;
     const result = extractToolCall(response);
     expect(result).toEqual({ name: "bigTool", arguments: bigObj });
+  });
+
+  it("extracts create_file tool_call with file content", () => {
+    const response = 'tool_call(name="create_file", arguments={"filePath": "test.txt", "content": "Hello, world!\nThis is a test file."})';
+    const result = extractToolCall(response);
+    expect(result).toEqual({ name: "create_file", arguments: { filePath: "test.txt", content: "Hello, world!\nThis is a test file." } });
   });
 });

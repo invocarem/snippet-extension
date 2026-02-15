@@ -50,11 +50,15 @@ export interface NativeToolResult {
 export class NativeToolsManager {
   private workspaceRoot: string | undefined;
 
-  constructor() {
-    // Get workspace root
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (workspaceFolders && workspaceFolders.length > 0) {
-      this.workspaceRoot = workspaceFolders[0].uri.fsPath;
+  constructor(workspaceRoot?: string) {
+    if (workspaceRoot) {
+      this.workspaceRoot = workspaceRoot;
+    } else {
+      // Get workspace root from VS Code if not provided
+      const workspaceFolders = vscode.workspace.workspaceFolders;
+      if (workspaceFolders && workspaceFolders.length > 0) {
+        this.workspaceRoot = workspaceFolders[0].uri.fsPath;
+      }
     }
   }
 
@@ -270,6 +274,8 @@ export class NativeToolsManager {
     toolName: string,
     arguments_: Record<string, any>
   ): Promise<NativeToolResult> {
+    // Log tool call for server-side visibility
+    console.log(`[NativeToolManager] Tool call: ${toolName}`, arguments_);
     try {
       switch (toolName) {
         case "read_file":

@@ -1,4 +1,24 @@
 /**
+ * Preprocesses a JSON-like string to make it safe for JSON.parse.
+ * - Converts literal newlines in string values to \n
+ * - Handles single quotes (optional, currently replaces with ")
+ * - Removes trailing commas
+ * - Leaves valid escape sequences intact
+ */
+function safeJsonParse(jsonStr: string): any {
+  // Replace single quotes with double quotes (if needed)
+  let safe = jsonStr.replace(/'/g, '"');
+  // Remove trailing commas
+  safe = safe.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
+  // Convert literal newlines inside string values to \n
+  // This regex finds string values and replaces literal newlines with \n
+  safe = safe.replace(/("(?:[^"\\]|\\.)*")/gs, (match) => {
+    // Only replace literal newlines inside the string value
+    return match.replace(/\n/g, '\\n');
+  });
+  return JSON.parse(safe);
+}
+/**
  * Utility to robustly extract tool calls from LLM responses.
  * Supports tool_call(name="...", arguments={...}) or tool_call(tool_name="...", args={...})
  * Handles large/complex JSON arguments.
@@ -22,8 +42,7 @@ export function extractToolCall(response: string): MCPToolCall | null {
   const openParen = response.indexOf("(", callStart);
   if (openParen === -1) return null;
 
-  // Find the closing parenthesis (naive, but improved below)
-  // We'll parse key-value pairs inside the parentheses
+  // Find the closing parenthesis (robust, supports nested and multiline)
   let i = openParen + 1;
   let depth = 1;
   let end = -1;
@@ -56,12 +75,23 @@ export function extractToolCall(response: string): MCPToolCall | null {
   // Find the start of the JSON object
   let jsonStart = inside.indexOf("{", argsKeyIdx);
   if (jsonStart === -1) return null;
-  // Find the end of the JSON object (brace matching)
+  // Find the end of the JSON object (brace matching, supports multiline and escaped braces)
   let braceDepth = 1;
   let j = jsonStart + 1;
+  let inString = false;
+  let escape = false;
   while (j < inside.length && braceDepth > 0) {
-    if (inside[j] === "{") braceDepth++;
-    else if (inside[j] === "}") braceDepth--;
+    const ch = inside[j];
+    if (escape) {
+      escape = false;
+    } else if (ch === '\\') {
+      escape = true;
+    } else if (ch === '"') {
+      inString = !inString;
+    } else if (!inString) {
+      if (ch === "{") braceDepth++;
+      else if (ch === "}") braceDepth--;
+    }
     j++;
   }
   if (braceDepth !== 0) return null;
@@ -69,11 +99,7 @@ export function extractToolCall(response: string): MCPToolCall | null {
 
   // Try to parse JSON (fix single quotes, trailing commas, etc. if needed)
   try {
-    // Replace single quotes with double quotes for JSON compatibility
-    let safeJson = jsonStr.replace(/'/g, '"');
-    // Remove trailing commas
-    safeJson = safeJson.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
-    const args = JSON.parse(safeJson);
+    const args = safeJsonParse(jsonStr);
     return { name, arguments: args };
   } catch (e) {
     return null;

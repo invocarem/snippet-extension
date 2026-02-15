@@ -247,11 +247,12 @@ export class MCPClient extends EventEmitter {
     }
 
     try {
+      console.log(`[MCP ${this.config.name}] Calling tool: ${toolName} with args:`, arguments_);
       const result = await this.sendRequest("tools/call", {
         name: toolName,
         arguments: arguments_,
       });
-
+      console.log(`[MCP ${this.config.name}] Tool call result:`, result);
       return result;
     } catch (error: any) {
       console.error(`[MCP ${this.config.name}] Tool call failed:`, error);
