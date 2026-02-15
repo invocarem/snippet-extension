@@ -193,7 +193,7 @@ export class LLMResponseProcessor {
 
     // Parse Harmony protocol if present (for models that use it)
     const parsed = HarmonyParser.parse(text);
-    const processedText = parsed.finalMessage;
+    const processedText = parsed.content;
 
     const { enableSyntaxHighlight, enableJsonFormatting, enableMarkdown } =
       this.options;

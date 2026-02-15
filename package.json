@@ -3,7 +3,7 @@
   "displayName": "Snippet - AI Prototyping",
   "description": "AI prototyping assistant powered by llama.cpp",
   "version": "0.0.1",
-  "publisher": "snippet",
+  "publisher": "dashtorock",
   "engines": {
     "vscode": "^1.84.0"
   },

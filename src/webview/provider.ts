@@ -1,11 +1,9 @@
 import * as vscode from "vscode";
 import { LlamaClient } from "../api/llamaClient";
-import { HarmonyParser } from "../utils/HarmonyParser";
 import { getNonce } from "../utils/getNonce";
-import { LLMResponseProcessor } from "../utils/llmResponseProcessor";
 import { SnippetManager } from "../utils/snippetManager";
 import { toolExecutor } from "../toolExecutor";
-import { extractToolCall, MCPToolCall } from "../utils/toolCallExtractor";
+import { ResponseParser, ParsedResponse } from "../utils/responseParser";
 import type { MCPManager } from "../mcpManager";
 import type { RulesManager } from "../rulesManager";
 
@@ -165,13 +163,11 @@ export class SnippetViewProvider implements vscode.WebviewViewProvider {
           },
           (chunk: string) => {
             fullResponse += chunk;
-            const parsed = HarmonyParser.parse(fullResponse);
-            const preprocessed = LLMResponseProcessor.preprocess(
-              parsed.finalMessage
-            );
+            // Parse response during streaming for real-time display
+            const parsed = ResponseParser.parse(fullResponse);
             this._sendMessageToWebview({
               type: "assistantMessageChunk",
-              chunk: preprocessed,
+              chunk: parsed.content,
               isFullContent: true,
             });
           }
@@ -179,52 +175,65 @@ export class SnippetViewProvider implements vscode.WebviewViewProvider {
 
         console.log(`[PROVIDER] Streaming completed. Full response length: ${fullResponse.length}`);
         console.log(`[PROVIDER] Full response:`, fullResponse);
-        const toolCall = extractToolCall(fullResponse);
-        if (toolCall) {
-          console.log(`[PROVIDER] Tool call detected:`, toolCall);
-          this._sendMessageToWebview({
-            type: "assistantMessageChunk",
-            chunk: `Executing tool: ${toolCall.name}...`,
-            isFullContent: false,
-          });
-          try {
-            const toolResult = await toolExecutor(toolCall, {
-              mcpManager: this.mcpManager,
-            });
-            const toolText = toolResult.content?.map(c => c.text).join("\n") || JSON.stringify(toolResult);
-            console.log(`[PROVIDER] Tool execution result:`, toolText);
+        
+        // Parse the complete response
+        const parsedResponse: ParsedResponse = ResponseParser.parse(fullResponse);
+        
+        // Log reasoning if present
+        if (parsedResponse.reasoning) {
+          console.log(`[PROVIDER] Reasoning extracted:`, parsedResponse.reasoning);
+        }
+        
+        // Handle tool calls
+        if (ResponseParser.hasToolCalls(parsedResponse)) {
+          const firstToolCall = ResponseParser.getFirstToolCall(parsedResponse);
+          console.log(`[PROVIDER] Tool call detected:`, firstToolCall);
+          
+          if (firstToolCall) {
             this._sendMessageToWebview({
               type: "assistantMessageChunk",
-              chunk: toolText,
-              isFullContent: true,
+              chunk: `Executing tool: ${firstToolCall.name}...`,
+              isFullContent: false,
             });
-            // Add tool result to conversation history as assistant message
-            this.conversationHistory.push({
-              role: "assistant",
-              content: fullResponse,
-            });
-            // Add tool result as user message for next round
-            this.conversationHistory.push({
-              role: "user",
-              content: toolText,
-            });
-            // Continue loop to allow next tool call
-            isFirst = false;
-            continue;
-          } catch (err: any) {
-            this._sendMessageToWebview({
-              type: "assistantMessageChunk",
-              chunk: `Tool execution error: ${err.message}`,
-              isFullContent: true,
-            });
-            continueLoop = false;
-            break;
+            try {
+              const toolResult = await toolExecutor(firstToolCall, {
+                mcpManager: this.mcpManager,
+              });
+              const toolText = toolResult.content?.map(c => c.text).join("\n") || JSON.stringify(toolResult);
+              console.log(`[PROVIDER] Tool execution result:`, toolText);
+              this._sendMessageToWebview({
+                type: "assistantMessageChunk",
+                chunk: toolText,
+                isFullContent: true,
+              });
+              // Add tool result to conversation history as assistant message
+              this.conversationHistory.push({
+                role: "assistant",
+                content: parsedResponse.raw,
+              });
+              // Add tool result as user message for next round
+              this.conversationHistory.push({
+                role: "user",
+                content: toolText,
+              });
+              // Continue loop to allow next tool call
+              isFirst = false;
+              continue;
+            } catch (err: any) {
+              this._sendMessageToWebview({
+                type: "assistantMessageChunk",
+                chunk: `Tool execution error: ${err.message}`,
+                isFullContent: true,
+              });
+              continueLoop = false;
+              break;
+            }
           }
         } else {
           // No more tool calls, finish
           this.conversationHistory.push({
             role: "assistant",
-            content: fullResponse,
+            content: parsedResponse.raw,
           });
           continueLoop = false;
         }

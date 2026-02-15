@@ -1,22 +1,122 @@
 /**
  * Preprocesses a JSON-like string to make it safe for JSON.parse.
- * - Converts literal newlines in string values to \n
- * - Handles single quotes (optional, currently replaces with ")
- * - Removes trailing commas
- * - Leaves valid escape sequences intact
+ * Handles literal newlines and unescaped quotes in string values.
  */
 function safeJsonParse(jsonStr: string): any {
-  // Replace single quotes with double quotes (if needed)
-  let safe = jsonStr.replace(/'/g, '"');
-  // Remove trailing commas
-  safe = safe.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
-  // Convert literal newlines inside string values to \n
-  // This regex finds string values and replaces literal newlines with \n
-  safe = safe.replace(/("(?:[^"\\]|\\.)*")/gs, (match) => {
-    // Only replace literal newlines inside the string value
-    return match.replace(/\n/g, '\\n');
-  });
-  return JSON.parse(safe);
+  // Try standard JSON parsing first
+  try {
+    return JSON.parse(jsonStr);
+  } catch (firstError) {
+    // JSON is malformed, likely due to unescaped quotes or literal newlines in content
+    // Process character-by-character to fix it
+    
+    let result = '';
+    let i = 0;
+    let inString = false;
+    let expectingKey = false; // Track if next string is a JSON key
+    let depth = 0; // Brace depth to track object nesting
+    
+    while (i < jsonStr.length) {
+      const char = jsonStr[i];
+      const next = i < jsonStr.length - 1 ? jsonStr[i + 1] : '';
+      
+      // Handle escape sequences
+      if (char === '\\' && inString) {
+        result += char;
+        if (next) {
+          result += next;
+          i += 2;
+        } else {
+          i++;
+        }
+        continue;
+      }
+      
+      // Track object depth when not in strings
+      if (!inString) {
+        if (char === '{') {
+          depth++;
+          expectingKey = true; // After {, we expect a key (or })  
+          result += char;
+          i++;
+          continue;
+        } else if (char === '}') {
+          depth--;
+          expectingKey = false;
+          result += char;
+          i++;
+          continue;
+        } else if (char === ',' && depth > 0) {
+          expectingKey = true; // After , in an object, we expect a key
+          result += char;
+          i++;
+          continue;
+        }
+      }
+      
+      // Handle quotes
+      if (char === '"') {
+        if (!inString) {
+          // Starting a string
+          inString = true;
+          result += char;
+          i++;
+          continue;
+        } else {
+          // Could be end of string OR embedded quote
+          // Look ahead to see what follows
+          const afterQuote = jsonStr.substring(i + 1).match(/^\s*([,:}\]])/);
+          
+          if (afterQuote) {
+            const nextToken = afterQuote[1];
+            // Closing quote if:
+            // - Followed by : and we're expecting a key
+            // - Followed by , } ] (end of value)
+            const isClosing = (nextToken === ':' && expectingKey) || (nextToken === ',' || nextToken === '}' || nextToken === ']');
+            
+            if (isClosing) {
+              // End of string
+              inString = false;
+              if (nextToken === ':') {
+                expectingKey = false; // After :, we expect a value
+              }
+              result += char;
+              i++;
+              continue;
+            }
+          }
+          
+          // Embedded quote - escape it
+          result += '\\' + char;
+          i++;
+          continue;
+        }
+      }
+      
+      // Handle control characters inside strings
+      if (inString) {
+        if (char === '\n') {
+          result += '\\n';
+        } else if (char === '\r') {
+          result += '\\r';
+        } else if (char === '\t') {
+          result += '\\t';
+        } else {
+          result += char;
+        }
+      } else {
+        // Outside strings, just copy
+        result += char;
+      }
+      
+      i++;
+    }
+    
+    // Remove trailing commas
+    result = result.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
+    
+    return JSON.parse(result);
+  }
 }
 /**
  * Utility to robustly extract tool calls from LLM responses.
@@ -101,7 +201,7 @@ export function extractToolCall(response: string): MCPToolCall | null {
   try {
     const args = safeJsonParse(jsonStr);
     return { name, arguments: args };
-  } catch (e) {
+  } catch (e: any) {
     return null;
   }
 }

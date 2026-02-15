@@ -62,4 +62,25 @@ describe("extractToolCall", () => {
     const result = extractToolCall(response);
     expect(result).toEqual({ name: "create_file", arguments: { filePath: "test.txt", content: "Hello, world!\nThis is a test file." } });
   });
+
+  it("handles Python-style triple-quoted strings", () => {
+    const response = 'tool_call(name="create_file", arguments={ "file_path": "hello.py", "content": """def greet(name=\\"World\\"):\\n    \\"\\"\\"Return a greeting message.\\"\\"\\"\\n    return f\\"Hello, {name}!\\"\\n\\nif __name__ == \\"__main__\\":\\n    print(greet())\\n    print(greet(\\"Python\\"))\\n""" })';
+    const result = extractToolCall(response);
+    expect(result).toBeTruthy();
+    expect(result?.name).toBe("create_file");
+    expect(result?.arguments.file_path).toBe("hello.py");
+    expect(result?.arguments.content).toContain("def greet");
+    expect(result?.arguments.content).toContain("Return a greeting message");
+  });
+
+  it("handles replace_file tool_call with Python script content", () => {
+    const response = `tool_call(name="replace_file", arguments={ "file_path": "hello.py", "content": "#!/usr/bin/env python3\n\"\"\"\nA simple Python script that prints greetings.\n\"\"\"\nimport argparse\n\n\ndef greet(name):\n    \"\"\"Greet someone by name.\"\"\"\n    return f\"Hello, {name}!\"\n\n\ndef main():\n    parser = argparse.ArgumentParser(description='Greet someone.')\n    parser.add_argument('--name', type=str, default='World', \n                        help='Name of the person to greet')\n    args = parser.parse_args()\n    \n    print(greet(args.name))\n\nif __name__ == \"__main__\":\n    main()\n" })`;
+
+    const result = extractToolCall(response);
+    expect(result).toBeTruthy();
+    expect(result?.name).toBe("replace_file");
+    expect(result?.arguments.file_path).toBe("hello.py");
+    expect(result?.arguments.content).toContain("A simple Python script that prints greetings.");
+    expect(result?.arguments.content).toContain("def greet(name):");
+  });
 });
