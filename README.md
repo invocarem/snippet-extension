@@ -1,6 +1,8 @@
+
 # Snippet - AI Prototyping Extension
 
-A VS Code extension for AI-powered code prototyping using llama.cpp.
+A VS Code extension for AI-powered code prototyping, tool execution, and rule-based automation using llama.cpp, MCP, and native tools.
+
 
 ## Features
 
@@ -8,10 +10,24 @@ A VS Code extension for AI-powered code prototyping using llama.cpp.
 - 🔄 **Streaming Responses**: Real-time streaming of AI responses
 - 📝 **Code Insertion**: Insert AI-generated code directly into your editor
 - 🔍 **Code Explanation**: Right-click on selected code to get explanations
-- ⚙️ **Configurable**: Customize server URL, temperature, and token limits
+- ⚙️ **Configurable**: Customize server URL, temperature, token limits, and more
 - 🎨 **Rich Formatting**: Full markdown and code block formatting support
+- 🛠️ **Tool Execution**: Call both native and MCP tools from chat or programmatically
+- 📜 **Rule System**: Define and manage custom rules to automate workflows and guide LLM behavior
+- 🧩 **Tool Extraction**: Robustly extract and execute tool calls from LLM responses
+- 🤖 **MCP Integration**: Connect to multiple Model Context Protocol (MCP) servers for advanced tool orchestration
 
-## Rich Formatting Support
+
+## Architecture Overview
+
+The extension is modular and supports advanced AI-driven workflows:
+
+- **Native Tools**: Run local tools (e.g., file operations, shell commands) securely from the extension or LLM.
+- **MCP Tools**: Connect to external MCP servers for distributed tool execution and orchestration.
+- **Rules**: Author custom rules (YAML/JSON/Markdown) to automate tasks, enforce policies, or guide LLM output.
+- **Tool Extraction**: The tool extractor parses LLM responses for tool_call(...) patterns and executes them.
+- **Tool Executor**: Central logic for dispatching tool calls to native or MCP tools.
+- **Webview UI**: Rich chat interface for interacting with LLM, tools, and rules.
 
 The extension now supports comprehensive formatting for LLM responses:
 
@@ -38,6 +54,7 @@ console.log("Code with syntax highlighting!");
 }
 \`\`\`
 
+
 ## Prerequisites
 
 1. **llama.cpp server**: You need to have llama.cpp running with its HTTP server
@@ -48,6 +65,7 @@ console.log("Code with syntax highlighting!");
    ```
 
 2. A compatible GGUF model file
+
 
 ## Installation
 
@@ -62,7 +80,9 @@ console.log("Code with syntax highlighting!");
    ```
 4. Press F5 to open a new VS Code window with the extension loaded
 
+
 ## Usage
+
 
 ### Starting the Chat
 
@@ -71,48 +91,90 @@ console.log("Code with syntax highlighting!");
 3. Check the connection status at the top of the chat panel
 4. Type your message and press Ctrl/Cmd+Enter or click Send
 
+
 ### Explaining Code
 
 1. Select code in your editor
 2. Right-click and select "Snippet: Explain Selected Code"
 3. The chat panel will open with the code automatically inserted
 
-### Inserting Generated Code
+
+### Tool Execution
+
+You can call tools directly from the chat using the `tool_call` syntax:
+
+```
+tool_call(name="read_file", arguments={ "file_path": "src/index.ts" })
+```
+
+Both native and MCP tools are supported. The extension will extract and execute tool calls from LLM responses automatically.
+
+### Rule System
+
+Define custom rules to automate workflows, enforce coding standards, or guide LLM output. Rules can be managed via settings (`snippet.rules` and `snippet.rulesPaths`).
+
+Example rule config:
+```json
+{
+   "id": "require-docstring",
+   "description": "All functions must have a docstring.",
+   "enabled": true
+}
+```
+
+Rules can be authored in Markdown, YAML, or JSON and loaded from files.
 
 When the AI generates code blocks, an "Insert at Cursor" button will appear. Click it to insert the code at your cursor position.
+
 
 ## Configuration
 
 Open VS Code settings and search for "Snippet":
 
 - **snippet.llamaServerUrl**: URL of your llama.cpp server (default: `http://localhost:8080`)
+- **snippet.mcpServers**: List of MCP servers for distributed tool execution
+- **snippet.rules**: Array of custom rules (id, description, enabled, config)
+- **snippet.rulesPaths**: Paths to rule files (Markdown/YAML/JSON)
 - **snippet.temperature**: Sampling temperature (0-2, default: 0.7)
 - **snippet.maxTokens**: Maximum tokens to generate (default: 2048)
 - **snippet.model**: Optional model name or path
+
 
 ## Commands
 
 - `Snippet: Open Chat` - Open the chat sidebar
 - `Snippet: Explain Selected Code` - Explain selected code
 - `Snippet: Insert Code at Cursor` - Insert code at cursor position
+- `snippet.callNativeTool` - Call a native tool (internal)
+
 
 ## Development
+
 
 ### Project Structure
 
 ```
 snippet-extension/
 ├── src/
-│   ├── extension.ts          # Extension entry point
+│   ├── extension.ts            # Extension entry point
+│   ├── mcpManager.ts           # MCP server and tool orchestration
+│   ├── rulesManager.ts         # Rule loading, watching, and management
 │   ├── api/
-│   │   └── llamaClient.ts    # llama.cpp API client
-│   ├── webview/
-│   │   └── provider.ts       # Webview provider for chat UI
-│   └── utils/
-│       ├── getNonce.ts       # Security utility
-│       └── llmResponseProcessor.ts  # LLM response processing and formatting
-├── package.json              # Extension manifest
-└── tsconfig.json            # TypeScript configuration
+│   │   ├── llamaClient.ts      # llama.cpp API client
+│   │   ├── mcpToolServer.ts    # MCP tool server integration
+│   │   ├── nativeToolServer.ts # Native tool server integration
+│   │   └── ruleServer.ts       # Rule server integration
+│   ├── utils/
+│   │   ├── toolCallExtractor.ts # Extracts tool calls from LLM responses
+│   │   ├── toolExecutor.ts      # Executes tool calls (native/MCP)
+│   │   ├── nativeToolManager.ts # Manages native tools
+│   │   ├── snippetManager.ts    # Snippet and prompt management
+│   │   └── ...                  # Other utilities
+│   └── webview/
+│       ├── provider.ts         # Webview provider for chat UI
+│       └── assets/             # Webview JS/CSS
+├── package.json                # Extension manifest
+└── tsconfig.json               # TypeScript configuration
 ```
 
 ### Building
@@ -132,6 +194,7 @@ npm install -g @vscode/vsce
 vsce package
 ```
 
+
 ## Troubleshooting
 
 ### "Not connected to llama.cpp"
@@ -150,6 +213,7 @@ vsce package
 
 - Check the Output panel (View > Output) and select "Snippet" from the dropdown
 - Look for error messages in the Developer Tools console (Help > Toggle Developer Tools)
+
 
 ## License
 
